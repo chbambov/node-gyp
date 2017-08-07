@@ -285,22 +285,6 @@ def _ConfigFullName(config_name, config_data):
   return '%s|%s' % (_ConfigBaseName(config_name, platform_name), platform_name)
 
 
-def _ConfigWindowsTargetPlatformVersion(config_data):
-  ver = config_data.get('msvs_windows_target_platform_version')
-  if not ver or re.match(r'^\d+', ver):
-    return ver
-  for key in [r'HKLM\Software\Microsoft\Microsoft SDKs\Windows\%s',
-              r'HKLM\Software\Wow6432Node\Microsoft\Microsoft SDKs\Windows\%s']:
-    sdkdir = MSVSVersion._RegistryGetValue(key % ver, 'InstallationFolder')
-    if not sdkdir:
-      continue
-    version = MSVSVersion._RegistryGetValue(key % ver, 'ProductVersion') or ''
-    # find a matching entry in sdkdir\include
-    names = sorted([x for x in os.listdir(r'%s\include' % sdkdir) \
-                    if x.startswith(version)], reverse = True)
-    return names[0]
-
-
 def _BuildCommandLineForRuleRaw(spec, cmd, cygwin_shell, has_input_path,
                                 quote_cmd, do_setup_env):
 
@@ -2653,6 +2637,9 @@ def _GetMSBuildGlobalProperties(spec, guid, gyp_file_name):
      os.environ.get('PROCESSOR_ARCHITEW6432') == 'AMD64':
     properties[0].append(['PreferredToolArchitecture', 'x64'])
 
+  properties[0].append(['WindowsTargetPlatformVersion',
+                            '10.0.15063.0'])
+
   if spec.get('msvs_enable_winrt'):
     properties[0].append(['DefaultLanguage', 'en-US'])
     properties[0].append(['AppContainerApplication', 'true'])
@@ -2677,22 +2664,6 @@ def _GetMSBuildGlobalProperties(spec, guid, gyp_file_name):
       properties[0].append(['ApplicationType', 'Windows Phone'])
     else:
       properties[0].append(['ApplicationType', 'Windows Store'])
-
-  platform_name = None
-  msvs_windows_target_platform_version = None
-  for configuration in spec['configurations'].itervalues():
-    platform_name = platform_name or _ConfigPlatform(configuration)
-    msvs_windows_target_platform_version = \
-                    msvs_windows_target_platform_version or \
-                    _ConfigWindowsTargetPlatformVersion(configuration)
-    if platform_name and msvs_windows_target_platform_version:
-      break
-
-  if platform_name == 'ARM':
-    properties[0].append(['WindowsSDKDesktopARMSupport', 'true'])
-  if msvs_windows_target_platform_version:
-    properties[0].append(['WindowsTargetPlatformVersion', \
-                          str(msvs_windows_target_platform_version)])
 
   return properties
 
@@ -3041,6 +3012,15 @@ def _FinalizeMSBuildSettings(spec, configuration):
   # TODO(jeanluc) We could optimize and generate these settings only if
   # the corresponding files are found, e.g. don't generate ResourceCompile
   # if you don't have any resources.
+
+  include_dirs.extend(["C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.15063.0\\um\\", 
+    "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.15063.0\\ucrt\\", 
+    "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.15063.0\\shared"])
+
+  resource_include_dirs.extend(["C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.15063.0\\um\\", 
+    "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.15063.0\\ucrt\\", 
+    "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.15063.0\\shared"])
+
   _ToolAppend(msbuild_settings, 'ClCompile',
               'AdditionalIncludeDirectories', include_dirs)
   _ToolAppend(msbuild_settings, 'Midl',
@@ -3051,6 +3031,10 @@ def _FinalizeMSBuildSettings(spec, configuration):
   # set, to prevent inheriting default libraries from the enviroment.
   _ToolSetOrAppend(msbuild_settings, 'Link', 'AdditionalDependencies',
                   libraries)
+
+  library_dirs.extend(["C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.15063.0\\ucrt\\x64", 
+    "C:\\Program Files (x86)\\Windows Kits\\10\Lib\\10.0.15063.0\\um\\x64"])
+  
   _ToolAppend(msbuild_settings, 'Link', 'AdditionalLibraryDirectories',
               library_dirs)
   if out_file:
@@ -3241,9 +3225,6 @@ def _GetMSBuildProjectReferences(project):
           ['ReferenceOutputAssembly', 'false']
           ]
       for config in dependency.spec.get('configurations', {}).itervalues():
-        if config.get('msvs_use_library_dependency_inputs', 0):
-          project_ref.append(['UseLibraryDependencyInputs', 'true'])
-          break
         # If it's disabled in any config, turn it off in the reference.
         if config.get('msvs_2010_disable_uldi_when_referenced', 0):
           project_ref.append(['UseLibraryDependencyInputs', 'false'])
